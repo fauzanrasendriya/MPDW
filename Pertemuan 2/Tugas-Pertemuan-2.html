@@ -3717,22 +3717,22 @@ SMA lebih akurat dalam menangkap pola data dibanding DMA.</p>
 <h1>Perbandingan Hasil Peramalan (MSE)</h1>
 <div class="sourceCode" id="cb53"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb53-1"><a href="#cb53-1" tabindex="-1"></a><span class="co"># Gabungkan MSE data latih dan data uji</span></span>
 <span id="cb53-2"><a href="#cb53-2" tabindex="-1"></a>perbandinganmse <span class="ot">&lt;-</span> <span class="fu">rbind</span>(</span>
-<span id="cb53-3"><a href="#cb53-3" tabindex="-1"></a>  <span class="fu">c</span>(akurasi_train.sma[<span class="dv">2</span>,<span class="dv">1</span>], akurasi_train.dma[<span class="dv">2</span>,<span class="dv">1</span>], akurasitrain_ses[<span class="dv">2</span>,<span class="dv">1</span>], akurasitrain_sesh[<span class="dv">2</span>,<span class="dv">1</span>], akurasitrain_des[<span class="dv">2</span>,<span class="dv">1</span>]),</span>
-<span id="cb53-4"><a href="#cb53-4" tabindex="-1"></a>  <span class="fu">c</span>(akurasi_test.sma[<span class="dv">2</span>,<span class="dv">1</span>], akurasi_test.dma[<span class="dv">2</span>,<span class="dv">1</span>], akurasitest_ses[<span class="dv">2</span>,<span class="dv">1</span>], akurasitest_sesh[<span class="dv">2</span>,<span class="dv">1</span>], akurasitest_des[<span class="dv">2</span>,<span class="dv">1</span>])</span>
+<span id="cb53-3"><a href="#cb53-3" tabindex="-1"></a>  <span class="fu">c</span>(akurasi_train.sma[<span class="dv">2</span>,<span class="dv">1</span>], akurasi_train.dma[<span class="dv">2</span>,<span class="dv">1</span>], akurasitrain_ses[<span class="dv">2</span>,<span class="dv">1</span>], akurasitrain_des[<span class="dv">2</span>,<span class="dv">1</span>]),</span>
+<span id="cb53-4"><a href="#cb53-4" tabindex="-1"></a>  <span class="fu">c</span>(akurasi_test.sma[<span class="dv">2</span>,<span class="dv">1</span>], akurasi_test.dma[<span class="dv">2</span>,<span class="dv">1</span>], akurasitest_ses[<span class="dv">2</span>,<span class="dv">1</span>], akurasitest_des[<span class="dv">2</span>,<span class="dv">1</span>])</span>
 <span id="cb53-5"><a href="#cb53-5" tabindex="-1"></a>)</span>
 <span id="cb53-6"><a href="#cb53-6" tabindex="-1"></a></span>
 <span id="cb53-7"><a href="#cb53-7" tabindex="-1"></a><span class="co"># Beri nama baris dan kolom</span></span>
 <span id="cb53-8"><a href="#cb53-8" tabindex="-1"></a><span class="fu">rownames</span>(perbandinganmse) <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;MSE Data Train&quot;</span>, <span class="st">&quot;MSE Data Test&quot;</span>)</span>
-<span id="cb53-9"><a href="#cb53-9" tabindex="-1"></a><span class="fu">colnames</span>(perbandinganmse) <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;SMA n=5&quot;</span>, <span class="st">&quot;DMA n=5&quot;</span>, <span class="st">&quot;SES alpha optimum&quot;</span>, <span class="st">&quot;SESH alpha optimum&quot;</span>,  <span class="st">&quot;DES alpha &amp; beta optimum&quot;</span>)</span>
+<span id="cb53-9"><a href="#cb53-9" tabindex="-1"></a><span class="fu">colnames</span>(perbandinganmse) <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;SMA n=5&quot;</span>, <span class="st">&quot;DMA n=5&quot;</span>, <span class="st">&quot;SES alpha optimum&quot;</span>,  <span class="st">&quot;DES alpha &amp; beta optimum&quot;</span>)</span>
 <span id="cb53-10"><a href="#cb53-10" tabindex="-1"></a></span>
 <span id="cb53-11"><a href="#cb53-11" tabindex="-1"></a><span class="co"># Tampilkan tabel</span></span>
 <span id="cb53-12"><a href="#cb53-12" tabindex="-1"></a>perbandinganmse</span></code></pre></div>
-<pre><code>##                 SMA n=5  DMA n=5 SES alpha optimum SESH alpha optimum
-## MSE Data Train 72.89979 112.3745          49.48624           49.48678
-## MSE Data Test  33.35200  39.9952          28.87397           28.87811
-##                DES alpha &amp; beta optimum
-## MSE Data Train                 49.64500
-## MSE Data Test                  31.84912</code></pre>
+<pre><code>##                 SMA n=5  DMA n=5 SES alpha optimum DES alpha &amp; beta optimum
+## MSE Data Train 72.89979 112.3745          49.48624                 49.64500
+## MSE Data Test  33.35200  39.9952          28.87397                 31.84912</code></pre>
+<p>SES dan DES dengan parameter optimum memberikan MSE paling rendah
+dibanding SMA dan DMA, artinya kedua metode ini lebih akurat untuk
+meramalkan data ini.</p>
 </div>
 
 
