@@ -1,0 +1,448 @@
+
+
+```{r setup, include=FALSE}
+install_load <- function (package1, ...){   
+   packages <- c(package1, ...)
+   for(package in packages){
+       if(package %in% rownames(installed.packages())){
+         do.call('library', list(package))
+       }
+       else{
+          install.packages(package)
+          do.call("library", list(package))
+       }
+   } 
+}
+
+install_load("knitr","showtext","rio","forecast","graphics","TTR","TSA","ggplot2")
+
+opts_knit$set(root.dir = normalizePath("./"))
+
+font_add_google("Lato", "lato")
+showtext_auto()
+```
+
+# Data
+
+## Impor Data
+
+```{r}
+url <- "https://raw.githubusercontent.com/fauzanrasendriya/MPDW/main/Pertemuan%202/dataudarajkt.csv"
+data <- import(url)
+
+# filter baris 251 sampai 375
+subset_data <- data[251:375, ]
+
+# menampilkan 5 data pertama
+head(subset_data)
+```
+
+Data yang digunakan merupakan data kualitas udara dengan peubah yang diamati adalah PM10, yaitu konsentrasi partikel dengan diameter 10 mikrometer atau lebih kecil. Dataset aslinya mencakup periode yang lebih panjang, namun untuk analisis ini diambil 125 observasi dari tanggal 24 Juni 2024 hingga 28 Oktober 2024. Data ini diperoleh dari Kaggle.
+
+## Eksplorasi Data
+
+```{r}
+# lihat data
+View(subset_data)
+str(subset_data)
+dim(subset_data)
+```
+
+```{r}
+# pilih variabel
+target_col <- "pm10"
+
+# buat time series
+ts_data <- ts(subset_data[[target_col]], frequency = 1)
+
+# ringkasan data
+summary(ts_data)
+```
+
+```{r}
+# plot time series
+ts.plot(ts_data, xlab="periode", ylab=target_col,
+        main = paste("plot time series dari", target_col))
+points(ts_data)
+
+# menyimpan plot
+dev.copy(png, paste0("plot_", target_col, ".png"))
+dev.off()
+```
+
+## Pembagian Data Latih / Uji
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji.
+
+```{r}
+# hitung jumlah data
+n <- nrow(subset_data)
+
+# tentukan batas 80%
+n_train <- floor(0.8 * n)
+
+# bagi data
+training_ts <- subset_data[1:n_train, ]
+testing_ts  <- subset_data[(n_train+1):n, ]
+
+# ubah ke time series pakai target_col
+train.ts <- ts(training_ts[[target_col]])
+test.ts  <- ts(testing_ts[[target_col]])
+```
+
+```{r}
+# plot data latih dan data uji
+ggplot() + 
+  geom_line(aes(x = 1:n_train, y = train.ts, col = "Data Latih")) +
+  geom_line(aes(x = (n_train+1):n, y = test.ts, col = "Data Uji")) +
+  labs(x = "Periode", y = target_col, color = "Keterangan") +
+  scale_colour_manual(values = c("Data Latih" = "blue", "Data Uji" = "red")) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+# Single Moving Average (SMA)
+
+## Pemulusan dan Peramalan dengan parameter `m=5`
+
+```{r}
+# parameter SMA
+m <- 5
+
+# hitung SMA
+data.sma <- SMA(train.ts, n = m)
+
+# forecast 1 periode ke depan
+data.ramal <- c(NA, data.sma)
+
+# forecast 24 periode ke depan sesuai data uji
+data.gab.sma <- cbind(
+  aktual    = c(ts_data),
+  pemulusan = c(data.sma, rep(NA, length(test.ts))),
+  ramalan   = c(data.ramal, rep(data.ramal[length(data.ramal)], length(test.ts)-1))
+)
+
+data.gab.sma
+```
+
+## Plot SMA
+
+```{r}
+# plot SMA
+ts.plot(ts_data, xlab = "periode", ylab = target_col,
+        main = paste("SMA m=", m, " dari", target_col))
+points(ts_data)
+lines(data.gab.sma[,2], col="green", lwd=2)
+lines(data.gab.sma[,3], col="red", lwd=2)
+legend("topleft",
+       c("data aktual", "data pemulusan", "data peramalan"),
+       lty = 1, col = c("black", "green", "red"), cex = 0.7)
+```
+
+## Akurasi Data Latih
+
+```{r}
+# hitung error data latih
+error_train.sma <- train.ts - data.ramal[1:length(train.ts)]
+
+# hitung akurasi mulai dari periode ke-(m+1)
+SSE_train.sma  <- sum(error_train.sma[(m+1):length(train.ts)]^2)
+MSE_train.sma  <- mean(error_train.sma[(m+1):length(train.ts)]^2)
+MAPE_train.sma <- mean(abs(error_train.sma[(m+1):length(train.ts)] / train.ts[(m+1):length(train.ts)]) * 100)
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, MAPE_train.sma),
+                            nrow = 3, byrow = TRUE)
+row.names(akurasi_train.sma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_train.sma) <- paste("Akurasi m =", m)
+akurasi_train.sma
+```
+
+Karena MAPE > 10%, akurasi model pada data latih bisa dikategorikan cukup baik namun tidak sangat akurat
+
+## Akurasi Data Train
+
+```{r}
+# menghitung nilai keakuratan data uji
+error_test.sma <- test.ts - data.gab.sma[(length(train.ts)+1):length(ts_data), 3]
+SSE_test.sma  <- sum(error_test.sma^2)
+MSE_test.sma  <- mean(error_test.sma^2)
+MAPE_test.sma <- mean(abs(error_test.sma / test.ts) * 100)
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma),
+                           nrow = 3, byrow = TRUE)
+row.names(akurasi_test.sma) <- c("SSE", "MSE", "MAPE")
+colnames(akurasi_test.sma) <- paste("Akurasi m =", m)
+akurasi_test.sma
+```
+
+Karena MAPE < 10%, akurasi model pada data uji dapat dikategorikan sangat baik.
+
+# Double Moving Average (DMA)
+
+## Pemulusan dan Peramalan dengan parameter `m=5`
+
+```{r}
+# parameter dma
+m <- 5
+h <- length(test.ts)
+
+# SMA
+SMA <- SMA(train.ts, n = m)
+
+# DMA
+DMA <- SMA(SMA, n = m)
+
+At <- 2*SMA - DMA
+Bt <- 2/(m-1) * (SMA - DMA)
+
+# forecast 1 periode ke depan untuk data latih
+data.ramal.dma <- c(NA, At + Bt)
+
+# forecast h periode ke depan untuk data uji
+forecast_h <- At[length(At)] + Bt[length(Bt)] * (1:h)
+
+pemulusan1_full <- c(SMA, rep(NA, h))
+pemulusan2_full <- c(DMA, rep(NA, h))
+At_full        <- c(At, rep(NA, h))
+Bt_full        <- c(Bt, rep(NA, h))
+ramalan_full   <- c(data.ramal.dma, forecast_h[-1])
+
+data.gab.dma <- cbind(
+  aktual      = c(ts_data),
+  pemulusan1  = pemulusan1_full,
+  pemulusan2  = pemulusan2_full,
+  At          = At_full,
+  Bt          = Bt_full,
+  ramalan     = ramalan_full
+)
+
+data.gab.dma
+```
+
+## Plot DMA
+
+```{r}
+# plot dma
+ts.plot(ts_data, xlab="Periode", ylab=target_col,
+        main=paste("DMA N=", m, " dari ", target_col))
+points(ts_data)
+lines(data.gab.dma[,3], col="green", lwd=2)  # pemulusan kedua
+lines(data.gab.dma[,6], col="red", lwd=2)    # ramalan
+legend("topleft", c("data aktual","pemulusan DMA","ramalan DMA"),
+       lty=1, col=c("black","green","red"), cex=0.8)
+```
+
+## Akurasi Data Latih
+
+```{r}
+error_train.dma <- train.ts - data.ramal.dma[1:length(train.ts)]
+SSE_train.dma <- sum(error_train.dma[(m*2):length(train.ts)]^2)
+MSE_train.dma <- mean(error_train.dma[(m*2):length(train.ts)]^2)
+MAPE_train.dma <- mean(abs(error_train.dma[(m*2):length(train.ts)] / train.ts[(m*2):length(train.ts)])*100)
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, MAPE_train.dma),
+                            nrow=3, byrow=TRUE)
+rownames(akurasi_train.dma) <- c("SSE","MSE","MAPE")
+colnames(akurasi_train.dma) <- paste("Akurasi m =", m)
+akurasi_train.dma
+```
+
+Karena nilai MAPE > 10%, akurasi pemodelan untuk data latih masih tergolong cukup baik, tapi tidak sebaik SMA dengan m lebih kecil.
+
+## Akurasi Data Uji
+
+```{r}
+error_test.dma <- test.ts - data.gab.dma[(length(train.ts)+1):(length(train.ts)+h),6]
+SSE_test.dma <- sum(error_test.dma^2)
+MSE_test.dma <- mean(error_test.dma^2)
+MAPE_test.dma <- mean(abs(error_test.dma / test.ts) * 100)
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, MAPE_test.dma),
+                           nrow=3, byrow=TRUE)
+rownames(akurasi_test.dma) <- c("SSE","MSE","MAPE")
+colnames(akurasi_test.dma) <- paste("Akurasi m =", m)
+akurasi_test.dma
+```
+
+Karena nilai MAPE < 10%, sehingga akurasi model DMA pada data uji dikategorikan sangat baik
+
+Pada data latih, metode SMA lebih baik dibandingkan metode DMA, karena nilai MAPE-nya lebih rendah, menunjukkan peramalan SMA lebih dekat dengan data aktual.
+Begitu juga pada data uji, metode SMA tetap lebih baik dibandingkan DMA, dengan MAPE lebih kecil sehingga peramalan SMA lebih akurat dalam menangkap pola data dibanding DMA.
+
+# Single Exponential Smoothing
+
+## Pemulusan dan Peramalan dengan SES alpha optimum
+
+### Fungsi SES
+
+```{r}
+# cara 1 (fungsi ses)
+data.ses <- ses(train.ts, h = length(test.ts), alpha = NULL)
+data.ses
+```
+
+### Fungsi HoltWinters
+
+```{r}
+data.sesh <- HoltWinters(train.ts, gamma = FALSE, beta = FALSE, alpha = NULL)
+data.sesh
+```
+
+```{r}
+data.ramalsesh <- forecast(data.sesh, h = length(test.ts))
+data.ramalsesh
+```
+
+## Plot SES
+
+### Fungsi SES
+
+```{r}
+# plot ses
+plot(data.ses)
+```
+
+### Fungsi HoltWinters
+
+```{r}
+# plot holtwinters
+plot(data.sesh)
+```
+
+## Akurasi Data Latih
+
+### Data Latih SES
+
+```{r}
+SSE_train_ses  <- sum((train.ts - data.ses$fitted)^2, na.rm = TRUE)
+MSE_train_ses  <- SSE_train_ses / length(train.ts)
+RMSE_train_ses <- sqrt(MSE_train_ses)
+
+akurasitrain_ses <- matrix(c(SSE_train_ses, MSE_train_ses, RMSE_train_ses),
+                           ncol = 1,
+                           dimnames = list(c("SSE","MSE","RMSE"),
+                                           "Train SES alpha optimum"))
+akurasitrain_ses
+```
+
+### Data Latih HoltWinters
+
+```{r}
+SSE_train_sesh  <- data.sesh$SSE
+MSE_train_sesh  <- SSE_train_sesh / length(train.ts)
+RMSE_train_sesh <- sqrt(MSE_train_sesh)
+
+akurasitrain_sesh <- matrix(c(SSE_train_sesh, MSE_train_sesh, RMSE_train_sesh),
+                            ncol = 1,
+                            dimnames = list(c("SSE","MSE","RMSE"),
+                                            "Train HoltWinters alpha optimum"))
+akurasitrain_sesh
+```
+
+
+## Akurasi Data Uji
+
+### Data Uji SES
+
+```{r}
+err_test_ses  <- as.numeric(data.ses$mean) - as.numeric(test.ts)
+SSE_test_ses  <- sum(err_test_ses^2, na.rm = TRUE)
+MSE_test_ses  <- mean(err_test_ses^2, na.rm = TRUE)
+RMSE_test_ses <- sqrt(MSE_test_ses)
+
+akurasitest_ses <- matrix(c(SSE_test_ses, MSE_test_ses, RMSE_test_ses),
+                          ncol = 1,
+                          dimnames = list(c("SSE","MSE","RMSE"),
+                                          "Test SES alpha optimum"))
+akurasitest_ses
+```
+
+### Data Uji HoltWinters
+
+```{r}
+err_test_sesh  <- as.numeric(data.ramalsesh$mean) - as.numeric(test.ts)
+SSE_test_sesh  <- sum(err_test_sesh^2, na.rm = TRUE)
+MSE_test_sesh  <- mean(err_test_sesh^2, na.rm = TRUE)
+RMSE_test_sesh <- sqrt(MSE_test_sesh)
+
+akurasitest_sesh <- matrix(c(SSE_test_sesh, MSE_test_sesh, RMSE_test_sesh),
+                           ncol = 1,
+                           dimnames = list(c("SSE","MSE","RMSE"),
+                                           "Test HoltWinters alpha optimum"))
+akurasitest_sesh
+```
+
+# Double Exponential Smoothing
+
+## Pemulusan dan Peramalan dengan DES alpha dan beta optimum
+
+```{r}
+data.des <- holt(train.ts, h = length(test.ts), alpha = NULL, beta = NULL, damped = FALSE)
+data.des
+```
+
+## Plot DES
+
+```{r}
+autoplot(data.des) +
+  autolayer(fitted(data.des), series="Fitted", color="blue") +
+  autolayer(test.ts, series="Actual Test", color="red") +
+  ylab(target_col) +
+  xlab("Periode") +
+  ggtitle("Double Exponential Smoothing (DES) dengan Data Latih dan Ramalan") +
+  theme_minimal()
+```
+
+## Akurasi Data Latih
+
+```{r}
+SSE_train_des  <- sum((train.ts - fitted(data.des))^2, na.rm = TRUE)
+MSE_train_des  <- SSE_train_des / length(train.ts)
+RMSE_train_des <- sqrt(MSE_train_des)
+
+akurasitrain_des <- matrix(c(SSE_train_des, MSE_train_des, RMSE_train_des),
+                           ncol = 1,
+                           dimnames = list(c("SSE","MSE","RMSE"),
+                                           "Train DES alpha/beta optimum"))
+akurasitrain_des
+```
+
+
+## Akurasi Data Uji
+
+```{r}
+err_test_des  <- as.numeric(data.des$mean) - as.numeric(test.ts)
+SSE_test_des  <- sum(err_test_des^2, na.rm = TRUE)
+MSE_test_des  <- mean(err_test_des^2, na.rm = TRUE)
+RMSE_test_des <- sqrt(MSE_test_des)
+
+akurasitest_des <- matrix(c(SSE_test_des, MSE_test_des, RMSE_test_des),
+                          ncol = 1,
+                          dimnames = list(c("SSE","MSE","RMSE"),
+                                          "Test DES alpha/beta optimum"))
+akurasitest_des
+```
+
+# Perbandingan Hasil Peramalan (MSE)
+
+```{r}
+# Gabungkan MSE data latih dan data uji
+perbandinganmse <- rbind(
+  c(akurasi_train.sma[2,1], akurasi_train.dma[2,1], akurasitrain_ses[2,1], akurasitrain_des[2,1]),
+  c(akurasi_test.sma[2,1], akurasi_test.dma[2,1], akurasitest_ses[2,1], akurasitest_des[2,1])
+)
+
+# Beri nama baris dan kolom
+rownames(perbandinganmse) <- c("MSE Data Train", "MSE Data Test")
+colnames(perbandinganmse) <- c("SMA n=5", "DMA n=5", "SES alpha optimum",  "DES alpha & beta optimum")
+
+# Tampilkan tabel
+perbandinganmse
+```
+
+SES dan DES dengan parameter optimum memberikan MSE paling rendah dibanding SMA dan DMA, artinya kedua metode ini lebih akurat untuk meramalkan data ini.
+
+
+
+
+

@@ -1,0 +1,275 @@
+---
+title: "Tugas Pertemuan 2"
+author: "Muhammad Fauzan Nur Rasendriya (G1401231108)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    self_contained: true
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_depth: 5
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    number_sections: false
+    thumbnails: false
+    lightbox: true
+    gallery: true
+    fig_caption: true
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+    toc_depth: 3
+  word_document:
+    toc: false
+    toc_depth: '3'
+header-includes:
+- \usepackage{amsmath}
+- \usepackage{amssymb}
+- \usepackage{booktabs}
+---
+
+```{r setup, message=FALSE}
+install_load <- function (package1, ...){   
+   packages <- c(package1, ...)
+   for(package in packages){
+       if(package %in% rownames(installed.packages())){
+         do.call('library', list(package))
+       }
+       else{
+          install.packages(package)
+          do.call("library", list(package))
+       }
+   } 
+}
+
+install_load("knitr","showtext","rio","dplyr","TTR","forecast","lmtest","orcutt","HoRM","ggplot2","GGally")
+
+opts_knit$set(root.dir = normalizePath("./"))
+
+font_add_google("Lato", "lato")
+showtext_auto()
+```
+
+# Data
+
+```{r, message=FALSE}
+# Load Data CSV
+url <- "https://raw.githubusercontent.com/fauzanrasendriya/MPDW/main/Pertemuan%202/IPM_Yogya_2010_2024.csv"
+data <- import(url)
+
+head(data)
+```
+
+## Eksplorasi Awal
+
+Sebelum melakukan regresi, akan diperlihatkan *plot time-series* dari IPM D.I. Yogyakarta Periode 2010-2024
+
+```{r}
+# Membentuk objek time series
+data.ts <- ts(data$IPM, start = min(data$Tahun), frequency = 1)
+
+# Plot time series
+ts.plot(data.ts, xlab = "Tahun", ylab = "IPM", main = "Time Series Plot IPM D.I. Yogyakarta")
+points(data.ts)
+```
+
+## Scatterplot Data
+
+```{r}
+ggpairs(data,
+        upper = list(continuous = wrap("cor", size = 3)),
+        title = "Matriks Scatterplot Data")
+```
+
+Dari eksplorasi yang telah dilakukan, dapat dilihat data IPM D.I. Yogyakarta memiliki nilai korelasi 0.990
+
+## Model Data IPM D.I. Yogyakarta
+
+```{r}
+model <- lm(IPM ~ Tahun, data = data)
+summary(model)
+```
+
+# Pengujian
+
+## Uji Durbin Watson Test
+
+```{r}
+dwtest(model)
+```
+
+Berdasarkan hasil uji tes Durbin-Watson, diperoleh nilai $p-value$ sebesar 4.291e-05 yang di mana lebih kecil dari 0.05. Yang menandakan adanya korelasi pada data IPM D.I. Yogyakarta. Sehingga perlu ditangani.
+
+## Plot ACF dan PACF
+
+```{r}
+acf(resid(model), main = "ACF Residual Model Awal")
+pacf(resid(model), main = "PACF Residual Model Awal")
+```
+
+Tampak beberapa batang melewati batas signifikansi, artinya residual masih berkorelasi dengan periode sebelumnya. Ini alasan kenapa autokorelasi perlu ditangani.
+
+# Penanganan Autokorelasi
+
+## Metode Cochrane-Orcutt
+
+Penanganan metode Cochrane-Orcutt dapat dilakukan dengan bantuan packages Orcutt pada aplikasi `R` maupun secara manual. Berikut ini ditampilkan cara menggunakan bantuan `library` *packages* `Orcutt`.
+
+```{r}
+#Penanganan Autokorelasi Cochrane-Orcutt
+modelCO<-cochrane.orcutt(model)
+modelCO
+```
+
+Hasil keluaran model setelah dilakukan penanganan adalah sebagai berikut. $$y_i=-793.902703+0.432578x_t$$ Hasil juga menunjukkan bahwa nilai DW dan p-value meningkat menjadi $1.11266$ dan $1.458e-02$. Hal tersebut juga didukung dengan nilai *p-value* \< 0.05, artinya cukup bukti menyatakan bahwa sisaan terdapat autokorelasi pada taraf nyata 5%. Untuk nilai $ρ̂$ optimum yang digunakan adalah $0.742439$. Nilai tersebut dapat diketahui dengan *syntax* berikut.
+
+```{r}
+#Rho optimum
+rho <- modelCO$rho
+rho
+```
+
+Selanjutnya akan dilakukan transformasi secara manual dengan syntax berikut ini.
+
+```{r}
+data$IPM
+```
+
+```{r}
+data$IPM[-1]
+```
+
+```{r}
+#Transformasi Manual
+IPM.trans<- data$IPM[-1]-data$IPM[-15]*rho
+Tahun.trans<- data$Tahun[-1]-data$Tahun[-15]*rho
+modelCOmanual<- lm(IPM.trans~Tahun.trans)
+summary(modelCOmanual)
+```
+
+Hasil model transformasi bukan merupakan model sesungguhnya. Koefisien regresi masih perlu dicari kembali mengikuti $β_0^*=β_0+ρ ̂β_0$ dan $β_1^*=β_1$.
+
+```{r}
+#Mencari Penduga Koefisien Regresi setelah Transformasi ke Persamaan Awal
+b0bintang <- modelCOmanual$coefficients[-2]
+b0 <- b0bintang/(1-rho)
+b1 <- modelCOmanual$coefficients[-1]
+b0
+b1
+```
+
+Hasil perhitungan koefisien regresi tersebut akan menghasilkan hasil yang sama dengan model yang dihasilkan menggunakan *packages*.
+
+## Metode Hildreth-Lu
+
+Penanganan kedua adalah menggunakan metode Hildreth-Lu. Metode ini akan mencari nilai SSE terkecil dan dapat dicari secara manual maupun menggunakan packages. Jika menggunakan packages, gunakan `library` *packages* `HORM`.
+
+```{r}
+# ambil y dan x (satu prediktor saja)
+y <- data$IPM
+x <- data$Tahun
+
+# grid search rho 0–0.9
+r <- seq(0, 0.9, by = 0.1)
+tab <- data.frame(
+  rho = r,
+  SSE = sapply(r, function(rr) deviance(hildreth.lu(y, x, rr)))
+)
+
+tab            # tabel rho vs SSE
+rho_hat <- tab$rho[which.min(tab$SSE)]   # rho terbaik
+fit_hl  <- hildreth.lu(y, x, rho_hat)    # model final
+summary(fit_hl)
+```
+
+```{r}
+#Penanganan Autokorelasi Hildreth lu
+# Hildreth-Lu
+hildreth.lu.func<- function(r, model){
+  x <- model.matrix(model)[,-1]
+  y <- model.response(model.frame(model))
+  n <- length(y)
+  t <- 2:n
+  y <- y[t]-r*y[t-1]
+  x <- x[t]-r*x[t-1]
+  
+  return(lm(y~x))
+}
+
+#Pencariab rho yang meminimumkan SSE
+r <- c(seq(0.1,0.9, by= 0.1))
+tab <- data.frame("rho" = r, "SSE" = sapply(r, function(i){deviance(hildreth.lu.func(i, model))}))
+round(tab, 4)
+```
+
+Pertama-tama akan dicari di mana kira-kira $ρ$ yang menghasilkan SSE minimum. Pada hasil di atas terlihat $ρ$ minimum ketika 0.7. Namun, hasil tersebut masih kurang teliti sehingga akan dicari kembali $ρ$ yang lebih optimum dengan ketelitian yang lebih. Jika sebelumnya jarak antar $ρ$ yang dicari adalah 0.1, kali ini jarak antar $ρ$ adalah 0.001 dan dilakukan pada selang 0.6 sampai dengan 0.8.
+
+```{r}
+#Rho optimal di sekitar 0.7
+rOpt <- seq(0.74243,0.74245, by= 0.0000001)
+tabOpt <- data.frame("rho" = rOpt, "SSE" = sapply(rOpt, function(i){deviance(hildreth.lu.func(i, model))}))
+head(tabOpt[order(tabOpt$SSE),])
+
+#Grafik SSE optimum
+par(mfrow = c(1,1))
+plot(tab$SSE ~ tab$rho , type = "l", xlab = "Rho", ylab = "SSE")
+abline(v = tabOpt[tabOpt$SSE==min(tabOpt$SSE),"rho"], lty = 2, col="red",lwd=2)
+text(x=0.341, y=0.2397500, labels = "rho=0.7424385", cex = 0.8)
+```
+
+Perhitungan yang dilakukan aplikasi `R` menunjukkan bahwa nilai $ρ$ optimum, yaitu saat SSE terkecil terdapat pada nilai $ρ=0.7424385$. Hal tersebut juga ditunjukkan pada plot. Selanjutnya, model dapat didapatkan dengan mengevaluasi nilai $ρ$ ke dalam fungsi `hildreth.lu.func`, serta dilanjutkan dengan pengujian autokorelasi dengan uji Durbin-Watson. Namun, setelah pengecekan tersebut tidak lupa koefisien regresi tersebut digunakan untuk transformasi balik. Persamaan hasil transformasi itulah yang menjadi persamaan sesungguhnya.
+
+```{r}
+#Model terbaik
+modelHL <- hildreth.lu.func(0.7424385, model)
+summary(modelHL)
+
+#Transformasi Balik
+cat("y = ", coef(modelHL)[1]/(1-0.7424385), "+", coef(modelHL)[2],"x", sep = "")
+```
+
+Setelah dilakukan tranformasi balik, didapatkan model dengan metode Hildreth-Lu sebagai berikut. $$y_i=-793.9027+0.4325776x_t$$
+
+```{r}
+#Deteksi autokorelasi
+dwtest(modelHL)
+```
+
+Hasil uji Durbin-Watson juga menunjukkan bawah nilai DW sebesar $1.1127$ berada pada selang daerah tidak ada autokorelasi. Hal tersebut juga didukung oleh *p-value* sebesar $0.01458$, di mana *p-value* \< $\alpha$=5%. Artinya tolak $H_0$ atau cukup bukti menyatakan bahwa ada autokorelasi dalam data nilai IPM dengan metode Hildreth-Lu pada taraf nyata 5%.
+
+Terakhir, akan dibandingkan nilai SSE dari ketiga metode (metode awal, metode Cochrane-Orcutt, dan Hildreth-Lu).
+
+```{r}
+#Perbandingan
+sseModelawal <- anova(model)$`Sum Sq`[-1]
+sseModelCO <- anova(modelCOmanual)$`Sum Sq`[-1]
+sseModelHL <- anova(modelHL)$`Sum Sq`[-1]
+mseModelawal <- sseModelawal/length(data$IPM)
+mseModelCO <- sseModelCO/length(data$IPM)
+mseModelHL <- sseModelHL/length(data$IPM)
+akurasi <- matrix(c(sseModelawal,sseModelCO,sseModelHL,
+                    mseModelawal,mseModelCO,mseModelHL),nrow=2,ncol=3,byrow = T)
+colnames(akurasi) <- c("Model Awal", "Model Cochrane-Orcutt", "Model Hildreth-Lu")
+row.names(akurasi) <- c("SSE","MSE")
+akurasi
+```
+
+Berdasarkan hasil tersebut dapat diketahui bahwa hasil penanganan autokorelasi dengan metode Cochrane-Orcutt dan Hildreth-Lu memiliki SSE yang berbeda tipis dan lebih baik dibandingkan model awal.
+
+# Simpulan
+
+-   Model awal (OLS) menunjukkan adanya autokorelasi (DW test p \< 0.05).
+
+-   Plot ACF & PACF residual juga menguatkan bahwa residual masih saling berkorelasi.
+
+-   Penanganan dengan Cochrane-Orcutt dan Hildreth-Lu menghasilkan model yang hampir sama dengan rho optimum sekitar 0.742.
+
+-   SSE dan MSE setelah penanganan lebih baik dibandingkan model awal.
+
+<!-- -->
+
+-   Namun, uji DW menunjukkan masih ada autokorelasi tersisa → artinya model AR(1) saja mungkin belum cukup.

@@ -1,0 +1,456 @@
+---
+title: "Tugas Pertemuan 3"
+author: "Muhammad Fauzan Nur Rasendriya (G1401231108)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    self_contained: true
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_depth: 5
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    number_sections: false
+    thumbnails: false
+    lightbox: true
+    gallery: true
+    fig_caption: true
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+    toc_depth: 3
+  word_document:
+    toc: false
+    toc_depth: '3'
+header-includes:
+- \usepackage{amsmath}
+- \usepackage{amssymb}
+- \usepackage{booktabs}
+---
+
+```{r setup, message=FALSE}
+install_load <- function (package1, ...){   
+   packages <- c(package1, ...)
+   for(package in packages){
+       if(package %in% rownames(installed.packages())){
+         do.call('library', list(package))
+       }
+       else{
+          install.packages(package)
+          do.call("library", list(package))
+       }
+   } 
+}
+
+install_load("knitr","showtext","rio","dLagM","dynlm","MLmetrics","lmtest","car")
+
+opts_knit$set(root.dir = normalizePath("./"))
+
+font_add_google("Lato", "lato")
+showtext_auto()
+```
+
+# Data
+
+## Impor Data
+
+```{r}
+url <- "https://raw.githubusercontent.com/fauzanrasendriya/MPDW/main/Pertemuan%203/NewDelhi_Air_quality.csv"
+data <- import(url)
+
+# Menampilkan 5 data pertama
+head(data)
+```
+
+## Pembagian Data
+
+```{r}
+total_rows <- nrow(data)
+train_size <- floor(total_rows * 0.8)
+
+#SPLIT DATA
+train <- data[1:train_size, ]
+test <- data[(train_size + 1):total_rows, ]
+```
+
+```{r}
+#data time series
+train.ts<-ts(train)
+test.ts<-ts(test)
+data.ts<-ts(data)
+```
+
+# Model Koyck
+
+Model Koyck didasarkan pada asumsi bahwa semakin jauh jarak lag peubah independen dari periode sekarang maka semakin kecil pengaruh peubah lag terhadap peubah dependen.
+
+Koyck mengusulkan suatu metode untuk menduga model dinamis distributed lag dengan mengasumsikan bahwa semua koefisien $\beta$ mempunyai tanda sama.
+
+Model kyock merupakan jenis paling umum dari model infinite distributed lag dan juga dikenal sebagai geometric lag
+
+$$
+y_t=a(1-\lambda)+\beta_0X_t+\beta_1Z_t+\lambda Y_{t-1}+V_t
+$$
+
+dengan $$V_t=u_t-\lambda u_{t-1}$$
+
+## Pemodelan
+
+```{r}
+#MODEL KOYCK
+model.koyck <- koyckDlm(x = train$pm25, y = train$AQI)
+summary(model.koyck)
+AIC(model.koyck)
+BIC(model.koyck)
+```
+
+Dari hasil tersebut, didapat bahwa peubah $x_t$ dan $y_{t-1}$ memiliki nilai $P-Value<0.05$. Hal ini menunjukkan bahwa peubah $x_t$ dan $y_{t-1}$ berpengaruh signifikan terhadap $y$. Adapun model keseluruhannya adalah sebagai berikut
+
+$$
+\hat{Y_t}=4.5491-0.56825X_t+0.87326Y_{t-1}
+$$
+
+## Peramalan dan Akurasi
+
+Berikut adalah hasil peramalan y untuk 15 periode kedepan menggunakan model koyck
+
+```{r}
+fore.koyck <- forecast(model = model.koyck, x=test$pm25, h=15)
+fore.koyck
+mape.koyck <- MAPE(fore.koyck$forecasts, test$AQI)
+mape.koyck #data test
+#akurasi data training
+GoF(model.koyck)
+```
+
+# Regression with Distributed Lag
+
+## Pemodelan (Lag=2)
+
+```{r}
+model.dlm <- dlm(x = train$pm25,y = train$AQI , q = 2)
+summary(model.dlm)
+AIC(model.dlm)
+BIC(model.dlm)
+```
+
+Dari hasil diatas, didapat bahwa $P-value$ dari intercept dan $x_{t-1}<0.05$. Hal ini menunjukkan bahwa intercept dan $x_{t-1}$ berpengaruh signifikan terhadap $y$. Adapun model keseluruhan yang terbentuk adalah sebagai berikut
+
+$$
+\hat{Y_t}=35.139-7.940X_t+6.040X_{t-1}-2.033X_{t-2}
+$$
+
+## Peramalan dan Akurasi
+
+Berikut merupakan hasil peramalan $y$ untuk 15 periode kedepan
+
+```{r}
+fore.dlm <- forecast(model = model.dlm, x=test$pm25, h=15)
+fore.dlm
+mape.dlm <- MAPE(fore.dlm$forecasts, test$AQI)
+mape.dlm
+#akurasi data training
+GoF(model.dlm)
+```
+
+## *Lag* Optimum
+
+```{r}
+#penentuan lag optimum 
+finiteDLMauto(formula = AQI ~ pm25,
+              data = data.frame(train), q.min = 1, q.max =10,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+
+Berdasarkan output tersebut, lag optimum didapatkan ketika lag=6. Selanjutnya dilakukan pemodelan untuk lag=6
+
+```{r}
+#model dlm dengan lag optimum
+model.dlm2 <- dlm(x = train$pm25,y = train$AQI , q = 6)
+summary(model.dlm2)
+AIC(model.dlm2)
+BIC(model.dlm2)
+```
+
+Dari hasil tersebut terdapat beberapa peubah yang berpengaruh signifikan terhadap taraf nyata 5% yaitu $x_t$ , $x_{t-2}$ , $x_{t-4}$ , $x_{t-27}$. Adapun keseluruhan model yang terbentuk adalah
+
+$$
+\hat{Y_t}=55.3132-20.9551X_t+...+2.4068X_{t-27}
+$$
+
+Adapun hasil peramalan 15 periode kedepan menggunakan model tersebut adalah sebagai berikut
+
+```{r}
+#peramalan dan akurasi
+fore.dlm2 <- forecast(model = model.dlm2, x=test$pm25, h=15)
+
+#akurasi data test
+mape.dlm2<- MAPE(fore.dlm2$forecasts, test$AQI)
+mape.dlm2
+
+#akurasi data training
+GoF(model.dlm2)
+```
+
+Model tersebut merupakan model yang sangat baik dengan nilai MAPE yang kurang dari 10%.
+
+# Model Autoregressive
+
+## Pemodelan
+
+$p$ adalah integer yang mewakili panjang *lag* yang terbatas dan $q$ adalah integer yang merepresentasikan ordo dari proses *autoregressive*.
+
+```{r}
+model.ardl <- ardlDlm(x = train$pm25, y = train$AQI, p = 1 , q = 1)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+
+```{r}
+model.ardl <- ardlDlm(formula = AQI ~ pm25, 
+                         data = train,p = 1 , q = 1)
+summary(model.ardl)
+AIC(model.ardl)
+BIC(model.ardl)
+```
+
+Hasil di atas menunjukkan bahwa selain peubah $x_{t-1}$, hasil uji t menunjukkan nilai-p pada peubah $\ge0.05$ Hal ini menunjukkan bahwa peubah $x_{t-1}$ berpengaruh signifikan terhadap $y_t$, sementara $x_t$ dan $y_{t-1}$ berpengaruh signifikan terhadap $y_t$. Model keseluruhannya adalah sebagai berikut:
+
+$$
+\hat{Y}=3.84416-0.09036X_t-0.31343X_{t-1}+0.88721Y_{t-1}
+$$
+
+## Peramalan dan Akurasi
+
+```{r}
+fore.ardl <- forecast(model = model.ardl, x=test$pm25, h=15)
+fore.ardl
+```
+
+Data di atas merupakan hasil peramalan untuk 15 periode ke depan menggunakan Model Autoregressive dengan $p=1$ dan $q=1$.
+
+```{r}
+mape.ardl <- MAPE(fore.ardl$forecasts, test$AQI)
+mape.ardl
+#akurasi data training
+GoF(model.ardl)
+```
+
+Berdasarkan akurasi di atas, terlihat bahwa nilai MAPE keduanya tidak jauh berbeda. Artinya, model regresi dengan distribusi lag ini tidak `overfitted` atau `underfitted`
+
+## *Lag* Optimum
+
+```{r}
+#penentuan lag optimum
+model.ardl.opt <- ardlBoundOrders(data = data.frame(data), ic = "AIC", 
+                                  formula = AQI ~ pm25 )
+model.ardl.opt
+min_p=c()
+for(i in 1:10){
+  min_p[i]=min(model.ardl.opt$Stat.table[[i]])
+}
+q_opt=which(min_p==min(min_p, na.rm = TRUE))
+p_opt=which(model.ardl.opt$Stat.table[[q_opt]] == 
+              min(model.ardl.opt$Stat.table[[q_opt]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt, 
+           "AIC"=model.ardl.opt$min.Stat)
+```
+
+Dari tabel di atas, dapat terlihat bahwa nilai AIC terendah didapat ketika $p=15$ dan $q=5$, yaitu sebesar `124.7089`. Artinya, model autoregressive optimum didapat ketika $p=15$ dan $q=5$.
+
+Selanjutnya dapat dilakukan pemodelan dengan nilai $p$ dan $q$ optimum seperti inisialisasi di langkah sebelumnya.
+
+## Pemodelan Lag Opt
+
+```{r}
+# p = 15 => jumlah lag untuk variabel dependen Yt (autoregressive order)
+# q = 5  => jumlah lag untuk variabel independen Xt (distributed lag order)
+model.ardl.opt <- ardlDlm(x = train$pm25, y = train$AQI, p = 15, q = 5)
+
+# Menampilkan ringkasan hasil estimasi:
+# berisi koefisien model, uji signifikansi parameter, R-squared, dll.
+summary(model.ardl.opt)
+
+# Menghitung nilai Akaike Information Criterion (AIC)
+# → digunakan untuk mengevaluasi kualitas model, semakin kecil semakin baik
+AIC(model.ardl.opt)
+
+# Menghitung nilai Bayesian Information Criterion (BIC)
+# → kriteria evaluasi lain, lebih ketat daripada AIC
+BIC(model.ardl.opt)
+```
+
+```{r}
+model.ardl.opt <- ardlDlm(formula = AQI ~ pm25, 
+                         data = train,p = 15 , q = 5)
+summary(model.ardl.opt)
+AIC(model.ardl.opt)
+BIC(model.ardl.opt)
+```
+
+## Peramalan dan Akurasi Lag Opt
+
+```{r}
+# Peramalan (Forecast) dengan model ARDL lag optimum
+fore.ardl.opt <- forecast(model = model.ardl.opt, x = test$pm25, h = 15)
+
+# Menampilkan hasil ramalan
+fore.ardl.opt
+```
+
+```{r}
+# Menghitung nilai akurasi peramalan pada data test
+mape.ardl.opt <- MAPE(fore.ardl.opt$forecasts, test$AQI)
+mape.ardl.opt
+
+# Menghitung akurasi model pada data training
+GoF(model.ardl.opt)
+```
+
+# Pemodelan DLM & ARDL dengan Library `dynlm`
+
+`L()` : fungsi untuk mengambil nilai lag dari suatu variabel.
+
+`L(pm25)`= pm25 pada periode sebelumnya (lag ke-1).
+
+`L(pm25, 2)` = pm25 pada dua periode sebelumnya (lag ke-2).
+
+```{r}
+#sama dengan model dlm q=1
+cons_lm1 <- dynlm(AQI ~ pm25+L(pm25),data = train.ts)
+
+#sama dengan model ardl p=1 q=0
+cons_lm2 <- dynlm(AQI ~ pm25+L(AQI),data = train.ts)
+
+#sama dengan ardl p=1 q=1
+cons_lm3 <- dynlm(AQI ~ pm25+L(pm25)+L(AQI),data = train.ts)
+
+#sama dengan dlm p=2
+cons_lm4 <- dynlm(AQI ~ pm25+L(pm25)+L(pm25,2),data = train.ts)
+```
+
+## Ringkasan Model
+
+Berikut adalah ringkasan hasil estimasi dari masing-masing model:
+
+```{r}
+summary(cons_lm1)
+summary(cons_lm2)
+summary(cons_lm3)
+summary(cons_lm4)
+```
+
+## SSE
+
+Selain ringkasan hasil, kita juga bisa menghitung nilai SSE dari masing-masing model.
+
+```{r}
+deviance(cons_lm1)
+deviance(cons_lm2)
+deviance(cons_lm3)
+deviance(cons_lm4)
+```
+
+Semakin kecil nilai SSE, berarti model lebih baik dalam menyesuaikan data (karena error lebih kecil).
+
+## Ui encomptest
+
+Membandingkan kinerja antar model. Salah satu pendekatan yang dapat digunakan adalah encompassing test dengan fungsi `encomptest()` dari package `lmtest`.
+
+```{r}
+#uji model
+if(require("lmtest")) encomptest(cons_lm1, cons_lm2)
+```
+
+-   Model 1 : p-value 0.31055 (\> 0.05). Artinya, penambahan lag dari Y (`L(AQI)`) tidak memberikan peningkatan signifikan.\
+    Dengan demikian, Model 1 sudah memadai.
+
+-   Model 2 : p-value = 0.00505 (\< 0.01).\
+    Artinya, penambahan lag dari X (`L(pm25)`) memberikan peningkatan signifikan.Sehingga Model 2 tidak cukup memadai tanpa tambahan variabel lag dari pm25.
+
+### Uji Autokorelasi Residual
+
+```{r}
+#durbin watson
+dwtest(cons_lm1)
+dwtest(cons_lm2)
+dwtest(cons_lm3)
+dwtest(cons_lm4)
+```
+
+### Uji Heterogenitas
+
+```{r}
+bptest(cons_lm1)
+bptest(cons_lm2)
+bptest(cons_lm3)
+bptest(cons_lm4)
+```
+
+-   Jika p-value \> 0.05 → tidak ada heteroskedastisitas
+
+<!-- -->
+
+-    Jika p-value ≤ 0.05 → ada heteroskedastisitas.
+
+### Uji Normalitas
+
+H0: Residual berdistribusi normal.
+
+H1: Residual tidak berdistribusi normal.
+
+```{r}
+shapiro.test(residuals(cons_lm1))
+shapiro.test(residuals(cons_lm2))
+shapiro.test(residuals(cons_lm3))
+shapiro.test(residuals(cons_lm4))
+```
+
+-   Jika p-value \> 0.05 → gagal tolak H0 → residual normal.
+
+<!-- -->
+
+-    Jika p-value ≤ 0.05 → tolak H0 → residual tidak normal.
+
+# Perbandingan Model
+
+Membuat tabel ringkas akurasi model berdasarkan nilai MAPE (Mean Absolute Percentage Error).
+
+```{r}
+akurasi <- matrix(c(mape.koyck, mape.dlm, mape.dlm2,mape.ardl, mape.ardl.opt))
+row.names(akurasi)<- c("Koyck","DLM 1","DLM 2","Autoregressive","Autoregressive Opt")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+
+Berdasarkan nilai MAPE, model paling optimum didapat pada Model DLM 2 karena memiliki nilai MAPE yang terkecil.
+
+## Plot
+
+Untuk membandingkan hasil peramalan dari berbagai model (Koyck, DLM 1, DLM 2, dan ARDL) dengan data aktual, dibuat grafik garis. Visualisasi ini membantu melihat seberapa dekat hasil ramalan tiap model dengan nilai aktual.
+
+```{r}
+par(mfrow=c(1,1))  # atur layout grafik tunggal
+
+# plot data aktual
+plot(test$pm25, test$AQI, type="b", col="black", ylim=c(18,35))
+
+# tambahkan garis ramalan dari masing-masing model
+points(test$pm25, fore.koyck$forecasts, col="red");   lines(test$pm25, fore.koyck$forecasts, col="red")
+points(test$pm25, fore.dlm$forecasts, col="blue");    lines(test$pm25, fore.dlm$forecasts, col="blue")
+points(test$pm25, fore.dlm2$forecasts, col="orange"); lines(test$pm25, fore.dlm2$forecasts, col="orange")
+points(test$pm25, fore.ardl$forecasts, col="green");  lines(test$pm25, fore.ardl$forecasts, col="green")
+points(test$pm25, fore.ardl.opt$forecasts, col="pink");  lines(test$pm25, fore.ardl.opt$forecasts, col="pink")
+
+# legenda model
+legend("topleft",
+       c("Aktual", "Koyck","DLM 1","DLM 2", "Autoregressive", "Autoregressive Opt"),
+       lty=1, col=c("black","red","blue","orange","green","pink"), cex=0.8)
+```
+
+Berdasarkan plot perbandingan, terlihat bahwa semua model mampu mengikuti tren data aktual meskipun belum sepenuhnya konsisten. Model DLM 2 yang berwarna oranye, merupakan model yang paling mendekati tren data aktual karena memiliki pola tren yang hampir mirip, lalu model DLM 1 yang berwarna biru dan model Koyck yang berwarna merah juga hampir mendekati tren data aktual, sedangkan model lainnya masih belum terlalu mendekati tren data aktual.
