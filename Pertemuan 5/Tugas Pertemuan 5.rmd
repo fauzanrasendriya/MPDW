@@ -1,1 +1,237 @@
+---
+title: "Tugas Pertemuan 5"
+author: "Muhammad Fauzan Nur Rasendriya (G1401231108)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    self_contained: true
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_depth: 5
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    number_sections: true
+    thumbnails: false
+    lightbox: true
+    gallery: true
+    fig_caption: true
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+    toc_depth: 3
+  word_document:
+    toc: false
+    toc_depth: '3'
+header-includes:
+- \usepackage{amsmath}
+- \usepackage{amssymb}
+- \usepackage{booktabs}
+---
 
+# Library
+
+```{r setup, message=FALSE}
+install_load <- function (package1, ...){   
+   packages <- c(package1, ...)
+   for(package in packages){
+       if(package %in% rownames(installed.packages())){
+         do.call('library', list(package))
+       }
+       else{
+          install.packages(package)
+          do.call("library", list(package))
+       }
+   } 
+}
+
+install_load("knitr","showtext","rio","dplyr","tsibble","ggplot2","MASS","lattice","tseries")
+
+opts_knit$set(root.dir = normalizePath("./"))
+
+font_add_google("Lato", "lato")
+showtext_auto()
+```
+
+# Data
+
+## Impor Data
+
+```{r}
+data <- import("https://raw.githubusercontent.com/fauzanrasendriya/MPDW/main/Pertemuan%205/dataudarajkt.csv")
+
+head(data)
+```
+
+Data yang digunakan merupakan data kualitas udara dengan peubah yang diamati adalah PM10, yaitu konsentrasi partikel dengan diameter 10 mikrometer atau lebih kecil. Dataset aslinya mencakup periode yang lebih panjang, namun untuk analisis ini diambil 125 observasi dari tanggal 24 Juni 2024 hingga 28 Oktober 2024. Data ini diperoleh dari Kaggle.
+
+# Eksplorasi Data
+
+```{r}
+names(data)
+```
+
+```{r}
+# -----------------------------
+# Pilih peubah target di sini
+# -----------------------------
+target_col <- "pm10"
+```
+
+```{r}
+# filter baris 251 sampai 375
+subset_data <- data[251:375, c("tanggal", "stasiun", target_col)]
+
+# lihat data
+head(subset_data)
+```
+
+## Plot *Time Series*
+
+```{r}
+plot_subset_data <- subset_data |>
+  as_tsibble(index = tanggal) |>
+  ggplot(aes(x = tanggal, y = subset_data[[target_col]])) +
+  geom_line() +
+  theme_bw() +
+  xlab("tanggal") +
+  ylab(target_col)
+
+plot_subset_data
+```
+
+Berdasarkan plot *time series*, data terlihat stasioner dalam rataan karena tidak menunjukkan adanya tren maupun pola musiman. Namun, data belum stasioner dalam ragam, yang ditunjukkan oleh adanya perbedaan besar-kecilnya fluktuasi pada plot.
+
+```{r}
+mean(subset_data[[target_col]])
+```
+
+```{r}
+lattice::densityplot(as.vector(subset_data[[target_col]]), main = paste("Density of", target_col))
+```
+
+Plot *density* di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di nilai tengahnya (57) dan tidak stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang berbeda sepanjang waktu.
+
+## Plot ACF
+
+```{r}
+acf(subset_data[[target_col]], main = paste("ACF of", target_col))
+```
+
+Berdasarkan plot ACF, terlihat bahwa plot ACF pada data tersebut cenderung tails off dan membentuk gelombang sinus.
+
+## Uji ADF
+
+```{r, warning=FALSE}
+tseries::adf.test(subset_data[[target_col]])
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat p-value sebesar 0.01 yang kurang dari taraf nyata 5% dan menandakan bahwa data stasioner dalam rataan. Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+## Plot Box-Cox
+
+```{r}
+index <- seq_len(nrow(subset_data))
+
+# Box-Cox
+bc1 <- boxcox(
+  subset_data[[target_col]] ~ index,
+  lambda = seq(0, 6, by = 0.01)
+)
+```
+
+```{r}
+# Nilai lambda optimum
+lambda_bc1 <- bc1$x[which.max(bc1$y)]
+lambda_bc1
+```
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda1 <- bc1$x[bc1$y > max(bc1$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower1 <- min(ci_lambda1)
+ci_upper1 <- max(ci_lambda1)
+
+c(Batas_Bawah = ci_lower1, Batas_Atas = ci_upper1)
+```
+
+Hasil uji Box–Cox menunjukkan bahwa nilai λ optimum adalah 3.05 dengan interval kepercayaan 95% sebesar (2.19–4.00). Karena selang tersebut tidak memuat nilai λ = 1, maka dapat disimpulkan bahwa data tidak stasioner dalam ragam sehingga diperlukan transformasi.
+
+# Penanganan Stasioneritas Ragam
+
+## Transformasi Box–Cox
+
+```{r}
+# Transformasi Box-Cox dengan lambda ~ 3.05
+y_bc2 <- subset_data[[target_col]]^lambda_bc1
+
+# Uji Box-Cox
+bc2 <- boxcox(
+  y_bc2 ~ index,
+  lambda = seq(-1, 3, by = 0.001)
+)
+```
+
+```{r}
+# Nilai lambda optimum (dibulatkan)
+lambda_bc2 <- bc2$x[which.max(bc2$y)]
+lambda_bc2
+```
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda2 <- bc2$x[bc2$y > max(bc2$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower2 <- min(ci_lambda2)
+ci_upper2 <- max(ci_lambda2)
+
+c(Batas_Bawah = ci_lower2, Batas_Atas = ci_upper2)
+```
+
+Hasil uji Box–Cox menunjukkan bahwa nilai λ optimum adalah 1 dengan interval kepercayaan 95% sebesar (0.716–1.314). Karena selang tersebut memuat nilai λ = 1, maka dapat disimpulkan bahwa data stasioner dalam ragam.
+
+# Perbandingan Plot Sebelum Vs Sesudah Box-Cox
+
+## Plot *Time Series*
+
+```{r}
+# Time Series sebelum Box–Cox
+plot(subset_data$tanggal, subset_data[[target_col]], type="l",
+     main=paste("Time Series of", target_col, "(before Box-Cox)"),
+     xlab="Tanggal", ylab=target_col, col="blue")
+
+# Time Series sesudah Box–Cox
+plot(subset_data$tanggal, y_bc2, type="l",
+     main=paste("Time Series of", target_col, "(after Box-Cox)"),
+     xlab="Tanggal", ylab=paste(target_col, "(transformed)"), col="red")
+```
+
+Berdasarkan plot *time series*, data terlihat stasioner dalam rataan karena tidak menunjukkan adanya tren maupun pola musiman dan data juga terlihat stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+```{r}
+mean(subset_data[[target_col]])
+```
+
+## Plot *Density*
+
+```{r}
+# Density sebelum Box–Cox
+lattice::densityplot(as.vector(subset_data[[target_col]]), 
+                     main = paste("Density of", target_col, "(before Box-Cox)"))
+
+# Density sesudah Box–Cox
+lattice::densityplot(as.vector(y_bc2), 
+                     main = paste("Density of", target_col, "(after Box-Cox)"))
+```
+
+Plot *density* sesudah Box-Cox di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya (228) dan stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
