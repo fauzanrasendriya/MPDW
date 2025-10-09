@@ -1,0 +1,506 @@
+---
+title: "Tugas Pertemuan 6"
+author: "Muhammad Fauzan Nur Rasendriya (G1401231108)"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output:
+  html_document:
+    self_contained: true
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_depth: 5
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    number_sections: false
+    thumbnails: false
+    lightbox: true
+    gallery: true
+    fig_caption: true
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    toc: false
+    toc_depth: 3
+  word_document:
+    toc: false
+    toc_depth: '3'
+header-includes:
+- \usepackage{amsmath}
+- \usepackage{amssymb}
+- \usepackage{booktabs}
+---
+
+# Library
+
+```{r setup, message=FALSE}
+install_load <- function (package1, ...){   
+   packages <- c(package1, ...)
+   for(package in packages){
+       if(package %in% rownames(installed.packages())){
+         do.call('library', list(package))
+       }
+       else{
+          install.packages(package)
+          do.call("library", list(package))
+       }
+   } 
+}
+
+install_load("knitr","showtext","rio","dplyr","tsibble","ggplot2","MASS","lattice","tseries","forecast","TSA")
+
+opts_knit$set(root.dir = normalizePath("./"))
+
+font_add_google("Lato", "lato")
+showtext_auto()
+```
+
+# Data
+
+## Impor Data
+
+```{r}
+data <- import("https://raw.githubusercontent.com/fauzanrasendriya/MPDW/main/Pertemuan%205/dataudarajkt.csv")
+
+head(data)
+```
+
+Data yang digunakan merupakan data kualitas udara dengan peubah yang diamati adalah PM10, yaitu konsentrasi partikel dengan diameter 10 mikrometer atau lebih kecil. Dataset aslinya mencakup periode yang lebih panjang, namun untuk analisis ini diambil 125 observasi dari tanggal 24 Juni 2024 hingga 28 Oktober 2024. Data ini diperoleh dari Kaggle.
+
+# Eksplorasi Data
+
+```{r}
+names(data)
+```
+
+```{r}
+# -----------------------------
+# Pilih peubah target di sini
+# -----------------------------
+target_col <- "pm10"
+```
+
+```{r}
+# filter baris 251 sampai 375
+subset_data <- data[251:375, c("tanggal", "stasiun", target_col)]
+
+# lihat data
+head(subset_data)
+```
+
+## Plot *Time Series*
+
+```{r}
+plot_subset_data <- subset_data |>
+  as_tsibble(index = tanggal) |>
+  ggplot(aes(x = tanggal, y = subset_data[[target_col]])) +
+  geom_line() +
+  theme_bw() +
+  xlab("tanggal") +
+  ylab(target_col)
+
+plot_subset_data
+```
+
+Berdasarkan plot *time series*, data terlihat stasioner dalam rataan karena tidak menunjukkan adanya tren maupun pola musiman. Namun, data belum stasioner dalam ragam, yang ditunjukkan oleh adanya perbedaan besar-kecilnya fluktuasi pada plot.
+
+```{r}
+mean(subset_data[[target_col]])
+```
+
+## Plot *Density*
+
+```{r}
+lattice::densityplot(as.vector(subset_data[[target_col]]), main = paste("Density of", target_col))
+```
+
+Plot *density* di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di nilai tengahnya (57) dan tidak stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang berbeda sepanjang waktu.
+
+## Uji ADF
+
+```{r, warning=FALSE}
+tseries::adf.test(subset_data[[target_col]])
+```
+
+$H_0$ : Data tidak stasioner dalam rataan
+
+$H_1$ : Data stasioner dalam rataan
+
+Berdasarkan uji ADF tersebut, didapat p-value sebesar 0.01 yang kurang dari taraf nyata 5% dan menandakan bahwa data stasioner dalam rataan. Hal ini sesuai dengan hasil eksplorasi menggunakan plot time series dan plot ACF.
+
+## Plot Box-Cox
+
+```{r}
+index <- seq_len(nrow(subset_data))
+
+# Box-Cox
+bc1 <- boxcox(
+  subset_data[[target_col]] ~ index,
+  lambda = seq(0, 6, by = 0.01)
+)
+```
+
+```{r}
+# Nilai lambda optimum
+lambda_bc1 <- bc1$x[which.max(bc1$y)]
+lambda_bc1
+```
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda1 <- bc1$x[bc1$y > max(bc1$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower1 <- min(ci_lambda1)
+ci_upper1 <- max(ci_lambda1)
+
+c(Batas_Bawah = ci_lower1, Batas_Atas = ci_upper1)
+```
+
+Hasil uji Box–Cox menunjukkan bahwa nilai λ optimum adalah 3.05 dengan interval kepercayaan 95% sebesar (2.19–4.00). Karena selang tersebut tidak memuat nilai λ = 1, maka dapat disimpulkan bahwa data tidak stasioner dalam ragam sehingga diperlukan transformasi.
+
+# Penanganan Stasioneritas
+
+## Transformasi Box–Cox
+
+```{r}
+# Transformasi Box-Cox dengan lambda ~ 3.05
+y_bc2 <- subset_data[[target_col]]^lambda_bc1
+
+# Uji Box-Cox
+bc2 <- boxcox(
+  y_bc2 ~ index,
+  lambda = seq(-1, 3, by = 0.001)
+)
+```
+
+```{r}
+# Nilai lambda optimum (dibulatkan)
+lambda_bc2 <- bc2$x[which.max(bc2$y)]
+lambda_bc2
+```
+
+```{r}
+# Selang kepercayaan 95% untuk lambda
+ci_lambda2 <- bc2$x[bc2$y > max(bc2$y) - 0.5 * qchisq(0.95, 1)]
+
+# Batas bawah dan batas atas
+ci_lower2 <- min(ci_lambda2)
+ci_upper2 <- max(ci_lambda2)
+
+c(Batas_Bawah = ci_lower2, Batas_Atas = ci_upper2)
+```
+
+Hasil uji Box–Cox menunjukkan bahwa nilai λ optimum adalah 1 dengan interval kepercayaan 95% sebesar (0.716–1.314). Karena selang tersebut memuat nilai λ = 1, maka dapat disimpulkan bahwa data stasioner dalam ragam.
+
+# Perbandingan Plot Sebelum Vs Sesudah Box-Cox
+
+## Plot *Time Series*
+
+```{r}
+# Time Series sebelum Box–Cox
+plot(subset_data$tanggal, subset_data[[target_col]], type="l",
+     main=paste("Time Series of", target_col, "(before Box-Cox)"),
+     xlab="Tanggal", ylab=target_col, col="blue")
+
+# Time Series sesudah Box–Cox
+plot(subset_data$tanggal, y_bc2, type="l",
+     main=paste("Time Series of", target_col, "(after Box-Cox)"),
+     xlab="Tanggal", ylab=paste(target_col, "(transformed)"), col="red")
+```
+
+Berdasarkan plot *time series*, data terlihat stasioner dalam rataan karena tidak menunjukkan adanya tren maupun pola musiman dan data juga terlihat stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+```{r}
+mean(subset_data[[target_col]])
+```
+
+## Plot *Density*
+
+```{r}
+# Density sebelum Box–Cox
+lattice::densityplot(as.vector(subset_data[[target_col]]), 
+                     main = paste("Density of", target_col, "(before Box-Cox)"))
+
+# Density sesudah Box–Cox
+lattice::densityplot(as.vector(y_bc2), 
+                     main = paste("Density of", target_col, "(after Box-Cox)"))
+```
+
+Plot *density* sesudah Box-Cox di atas menunjukkan bahwa data stasioner dalam rataan, ditandai dengan data yang menyebar di sekitar nilai tengahnya (228) dan stasioner dalam ragam, ditandai dengan data berfluktuasi pada rentang yang relatif sama sepanjang waktu.
+
+# Pemodelan ARIMA
+
+## Split Data
+
+```{r}
+n <- length(y_bc2)
+n_train <- round(0.8 * n)
+
+train <- y_bc2[1:n_train]
+test  <- y_bc2[(n_train+1):n]
+```
+
+## Identifikasi Model
+
+### Plot ACF dan PACF
+
+```{r}
+acf(train, main="ACF - Train Data")
+pacf(train, main="PACF - Train Data")
+```
+
+Dari ACF:
+
+-   Lag 1–2 signifikan → ada autokorelasi pada lag awal.
+-   Setelah itu, nilai ACF menurun perlahan (tailing off). → Ciri khas adanya komponen AR (Autoregressive).
+
+Dari PACF:
+
+-   Lag 1 signifikan besar, setelah itu sebagian besar tidak signifikan (cut-off). → Ciri khas model AR(1) (p = 1).
+
+Kesimpulan gabungan ACF & PACF:
+
+-   ACF tailing off + PACF cut-off di lag 1 → indikasi kuat model kandidat adalah ARIMA(1,0,0) atau model dengan komponen AR dominan.
+
+### Plot EACF
+
+```{r}
+eacf(train)
+```
+
+Identifikasi model menggunakan plot EACF dilakukan dengan melihat ujung segitiga pada pola segitiga nol. Dalam hal ini model tentatif yang terbentuk adalah ARIMA(1,0,1), ARIMA(1,0,2), ARIMA(2,0,1), ARIMA(2,0,2), dan ARIMA(3,0,2).
+
+## Pendugaan Parameter Model Tentatif
+
+```{r}
+# Model 1: ARIMA(1,0,1)
+model1 <- Arima(train, order=c(1,0,1), method="ML")
+summary(model1)
+
+# Model 2: ARIMA(1,0,2)
+model2 <- Arima(train, order=c(1,0,2), method="ML")
+summary(model2)
+
+# Model 3: ARIMA(2,0,1)
+model3 <- Arima(train, order=c(2,0,1), method="ML")
+summary(model3)
+
+# Model 4: ARIMA(2,0,2)
+model4 <- Arima(train, order=c(2,0,2), method="ML")
+summary(model4)
+
+# Model 5: ARIMA(3,0,2)
+model5 <- Arima(train, order=c(3,0,2), method="ML")
+summary(model5)
+```
+
+### Ringkasan AIC
+
+```{r}
+model_tentatif <- data.frame(
+  Model = c("ARIMA(1,0,1)", "ARIMA(1,0,2)", 
+            "ARIMA(2,0,1)", "ARIMA(2,0,2)", 
+            "ARIMA(3,0,2)"),
+  AIC = c(AIC(model1), AIC(model2), 
+          AIC(model3), AIC(model4), 
+          AIC(model5)),
+  BIC = c(BIC(model1), BIC(model2), 
+          BIC(model3), BIC(model4), 
+          BIC(model5))
+)
+
+model_tentatif
+```
+
+Berdasarkan hasil perbandingan nilai AIC dan BIC pada beberapa model kandidat, diperoleh bahwa ARIMA(3,0,2) memiliki nilai AIC terkecil (2523.170), sedangkan ARIMA(2,0,2) memiliki nilai BIC terkecil (2539.143). Dengan demikian, model ARIMA(2,0,2) dipilih sebagai model terbaik karena lebih parsimonious sekaligus memberikan kecocokan yang memadai.
+
+# Uji Asumsi Residual
+
+## Eksplorasi Sisaan
+
+```{r}
+# Sisaan dari model
+sisaan <- model4$residuals
+
+par(mfrow = c(2,2),    
+    mar = c(4,4,2,1),  
+    oma = c(0,0,2,0))  
+
+# Q-Q Plot (normalitas)
+qqnorm(sisaan, main = "Normal Q-Q Plot")
+qqline(sisaan, col = "blue", lwd = 2)
+
+# Sisaan vs Waktu
+plot(sisaan, type = "p",
+     main = "Plot Sisaan vs Waktu",
+     xlab = "Waktu", ylab = "Sisaan")
+
+# ACF sisaan
+acf(sisaan, main = "ACF Sisaan")
+
+# PACF sisaan
+pacf(sisaan, main = "PACF Sisaan")
+
+```
+
+Dari Q-Q Plot:
+
+-   Titik-titik residual mengikuti garis diagonal.
+-   Hanya ada sedikit deviasi di bagian ekor.\
+    → Residual mendekati distribusi normal.
+
+Dari Plot Sisaan vs Waktu:
+
+-   Sisaan menyebar acak di sekitar garis nol.
+-   Tidak terlihat pola tertentu (tren atau musiman).\
+    → Residual bersifat acak (white noise).
+
+Dari ACF Sisaan:
+
+-   Hampir semua lag berada dalam batas kepercayaan.
+-   Tidak ada autokorelasi signifikan yang tersisa.\
+    → Menunjukkan residual tidak berkorelasi.
+
+Dari PACF Sisaan:
+
+-   Hampir semua lag juga dalam batas kepercayaan.
+-   Tidak ada pola autokorelasi parsial yang kuat.\
+    → Menguatkan bahwa residual white noise.
+
+Kesimpulan uji sisaan:
+
+-   Residual model memenuhi asumsi normalitas, keacakan, dan tidak ada autokorelasi.
+-   Model ARIMA yang dipilih sudah sesuai dan layak digunakan untuk peramalan.
+
+## Uji Formal
+
+```{r}
+#1) Sisaan Menyebar Normal 
+ks.test(sisaan,"pnorm")
+```
+
+**1. Uji Normalitas (Kolmogorov–Smirnov):**\
+- $H_0$: Sisaan berdistribusi normal\
+- $H_1$: Sisaan tidak berdistribusi normal\
+- Hasil: $D = 0.51$, $p\text{-value} < 2.2 \times 10^{-16}$\
+- Karena $p\text{-value} < 0.05$, maka $H_0$ ditolak.\
+- Interpretasi: Secara formal sisaan tidak normal. Namun, dari Q-Q plot terlihat bahwa sisaan masih mendekati distribusi normal dengan deviasi kecil pada ekor.
+
+```{r}
+#2) Sisaan saling bebas/tidak ada autokorelasi 
+Box.test(sisaan, type = "Ljung")
+```
+
+**2. Uji Autokorelasi (Box–Ljung Test pada sisaan):**\
+- $H_0$: Tidak ada autokorelasi pada sisaan (white noise)\
+- $H_1$: Ada autokorelasi pada sisaan\
+- Hasil: $\chi^2 = 1.5805$, $df = 1$, $p\text{-value} = 0.2087$\
+- Karena $p\text{-value} > 0.05$, maka $H_0$ diterima.\
+- Interpretasi: Sisaan tidak memiliki autokorelasi, sehingga memenuhi asumsi independensi.
+
+```{r}
+#3) Sisaan homogen 
+Box.test((sisaan)^2, type = "Ljung")
+```
+
+**3. Uji Heteroskedastisitas (Box–Ljung Test pada kuadrat sisaan):**\
+- $H_0$: Tidak ada autokorelasi pada kuadrat sisaan (ragam konstan / homoskedastis)\
+- $H_1$: Ada autokorelasi pada kuadrat sisaan (heteroskedastisitas)\
+- Hasil: $\chi^2 = 0.80456$, $df = 1$, $p\text{-value} = 0.3697$\
+- Karena $p\text{-value} > 0.05$, maka $H_0$ diterima.\
+- Interpretasi: Sisaan tidak menunjukkan gejala heteroskedastisitas, sehingga ragam dapat dianggap konstan.
+
+```{r}
+#4) Nilai tengah sisaan sama dengan nol 
+t.test(sisaan, mu = 0, conf.level = 0.95)
+```
+
+**4. Uji Rataan Nol (One Sample t-test):**\
+- $H_0$: $\mu_{\text{sisaan}} = 0$\
+- $H_1$: $\mu_{\text{sisaan}} \neq 0$\
+- Hasil: $t = 0.0679$, $df = 99$, $p\text{-value} = 0.946$\
+- Karena $p\text{-value} > 0.05$, maka $H_0$ diterima.\
+- Interval kepercayaan 95%: $(-12831.86 , 13741.63)$ mencakup 0.\
+- Interpretasi: Rataan sisaan tidak berbeda signifikan dari nol.
+
+**Kesimpulan umum:**\
+- Normalitas: ditolak secara formal, tetapi Q-Q plot menunjukkan mendekati normal.\
+- Autokorelasi: tidak ada (white noise).\
+- Heteroskedastisitas: tidak ada (ragam konstan).\
+- Rataan nol: terpenuhi.
+
+# Overfitting
+
+Tahapan selanjutnya adalah overfitting dilakukan dengan menaikkan orde AR($p$) dan MA($q$) dari model ARIMA(2,0,2). Kandidat model overfitting adalah ARIMA(3,0,2), ARIMA(2,0,3), dan ARIMA(3,0,3). Berdasarkan perbandingan nilai AIC dan BIC, model hasil overfitting tidak memberikan perbaikan yang berarti dibandingkan model tentatif. Oleh karena itu, model terbaik yang dipilih tetap ARIMA(2,0,2) dan akan digunakan pada tahap peramalan.
+
+```{r}
+# Overfitting models
+model_over1 <- Arima(train, order=c(3,0,2), method="ML")
+model_over2 <- Arima(train, order=c(2,0,3), method="ML")
+model_over3 <- Arima(train, order=c(3,0,3), method="ML")
+```
+
+## Ringkasan AIC
+
+```{r}
+# Tabel perbandingan AIC & BIC
+overfitting_models <- data.frame(
+  Model = c("ARIMA(2,0,2)", "ARIMA(3,0,2)", 
+            "ARIMA(2,0,3)", "ARIMA(3,0,3)"),
+  AIC = c(AIC(model4), AIC(model_over1), 
+          AIC(model_over2), AIC(model_over3)),
+  BIC = c(BIC(model4), BIC(model_over1), 
+          BIC(model_over2), BIC(model_over3))
+)
+
+overfitting_models
+```
+
+Meskipun ARIMA(3,0,2) memiliki AIC paling kecil, model ARIMA(2,0,2) dipilih sebagai model terbaik karena:
+
+-   Memberikan nilai BIC paling kecil,
+-   Lebih sederhana (parsimonious),
+-   Hasil overfitting tidak meningkatkan performa secara berarti.\
+    → Model ARIMA(2,0,2) digunakan untuk tahap peramalan.
+
+# Peramalan
+
+```{r}
+# Forecast sepanjang test
+ramalan <- forecast::forecast(model4, h = length(test))
+
+# Ambil nilai ramalan
+hasil <- ramalan$mean
+
+# Bandingkan aktual vs forecast
+perbandingan <- cbind(
+  Aktual   = as.numeric(test),
+  Forecast = as.numeric(hasil)
+)
+print(head(perbandingan, 10))
+
+# Hitung akurasi (MAPE, RMSE, dll)
+akurasi_test <- accuracy(hasil, test)
+akurasi_test
+```
+
+## Plot Data Aktual vs Forecast
+
+```{r}
+# Plot train + test
+ts.plot(c(train, test), col="black", lty=1, 
+        xlab="Waktu", ylab="PM10")
+
+# Tambahkan garis forecast
+lines((length(train)+1):(length(train)+length(test)), 
+      hasil, col="blue", lty=2, lwd=2)
+
+legend("topleft", 
+       legend=c("Data Aktual","Forecast"),
+       col=c("black","blue"),
+       lty=c(1,2), lwd=c(1,2), bty="n")
+```
+
+Berdasarkan grafik di atas, terlihat bahwa garis biru (hasil peramalan) mengikuti arah pergerakan garis hitam (data aktual) dengan pola yang relatif serupa, meskipun amplitudonya lebih kecil. Hal ini menunjukkan bahwa model ARIMA(2,0,2) sudah mampu menangkap tren umum pergerakan data PM10, tetapi belum sepenuhnya merepresentasikan fluktuasi nilai yang ekstrem.
